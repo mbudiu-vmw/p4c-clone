@@ -120,8 +120,7 @@ const IR::Type* TypeInference::cloneWithFreshTypeVariables(const IR::IMayBeGener
     return cl->to<IR::Type>();
 }
 
-TypeInference::TypeInference(ReferenceMap* refMap, TypeMap* typeMap,
-                             bool readOnly) :
+TypeInference::TypeInference(ReferenceMap* refMap, TypeMap* typeMap, bool readOnly) :
         refMap(refMap), typeMap(typeMap),
         initialNode(nullptr), readOnly(readOnly) {
     CHECK_NULL(typeMap);
@@ -197,7 +196,7 @@ TypeVariableSubstitution* TypeInference::unify(
     if (srcType == destType)
         return new TypeVariableSubstitution();
 
-    TypeConstraints constraints(typeMap->getSubstitutions(), strictStruct);
+    TypeConstraints constraints(typeMap->getSubstitutions(), typeMap);
     auto constraint = new EqualityConstraint(destType, srcType, errorPosition);
     if (!errorFormat.isNullOrEmpty())
         constraint->setError(errorFormat, errorArgs);
@@ -690,7 +689,7 @@ bool TypeInference::canCastBetween(const IR::Type* dest, const IR::Type* src) co
 
     if (dest->is<IR::Type_Newtype>()) {
         auto dt = getTypeType(dest->to<IR::Type_Newtype>()->type);
-        if (TypeMap::equivalent(dt, src, strictStruct))
+        if (typeMap->equivalent(dt, src))
             return true;
     }
 
@@ -705,7 +704,7 @@ bool TypeInference::canCastBetween(const IR::Type* dest, const IR::Type* src) co
         } else if (dest->is<IR::Type_Boolean>()) {
             return f->size == 1 && !f->isSigned;
         } else if (auto de = dest->to<IR::Type_SerEnum>()) {
-            return TypeMap::equivalent(src, getTypeType(de->type));
+            return typeMap->equivalent(src, getTypeType(de->type));
         } else if (dest->is<IR::Type_InfInt>()) {
             return true;
         }
@@ -718,14 +717,14 @@ bool TypeInference::canCastBetween(const IR::Type* dest, const IR::Type* src) co
         return dest->is<IR::Type_Bits>() || dest->is<IR::Type_Boolean>();
     } else if (src->is<IR::Type_Newtype>()) {
         auto st = getTypeType(src->to<IR::Type_Newtype>()->type);
-        return TypeMap::equivalent(dest, st, strictStruct);
+        return typeMap->equivalent(dest, st);
     } else if (auto se = src->to<IR::Type_SerEnum>()) {
         auto set = getTypeType(se->type);
         if (auto db = dest->to<IR::Type_Bits>()) {
-            return TypeMap::equivalent(set, db, strictStruct);
+            return typeMap->equivalent(set, db);
         }
         if (auto de = dest->to<IR::Type_SerEnum>()) {
-            return TypeMap::equivalent(set, getTypeType(de->type), strictStruct);
+            return typeMap->equivalent(set, getTypeType(de->type));
         }
     }
     return false;
@@ -752,7 +751,7 @@ TypeInference::assignment(const IR::Node* errorPosition, const IR::Type* destTyp
         sourceExpression = cts.convert(sourceExpression);  // sets type
     }
     if (destType->is<IR::Type_SerEnum>() &&
-        !TypeMap::equivalent(destType, initType, strictStruct)) {
+        !typeMap->equivalent(destType, initType)) {
         typeError("%1%: values of type '%2%' cannot be implicitly cast to type '%3%'",
                   errorPosition, initType, destType);
         return sourceExpression;
@@ -1636,11 +1635,11 @@ bool TypeInference::compare(const IR::Node* errorPosition,
     }
 
     bool defined = false;
-    if (TypeMap::equivalent(ltype, rtype, strictStruct) &&
+    if (typeMap->equivalent(ltype, rtype) &&
         (!ltype->is<IR::Type_Void>() && !ltype->is<IR::Type_Varbits>())) {
         defined = true;
     } else if (ltype->is<IR::Type_Base>() && rtype->is<IR::Type_Base>() &&
-               TypeMap::equivalent(ltype, rtype, strictStruct)) {
+               typeMap->equivalent(ltype, rtype)) {
         defined = true;
     } else if (ltype->is<IR::Type_BaseList>() && rtype->is<IR::Type_BaseList>()) {
         auto tvs = unify(errorPosition, ltype, rtype);
@@ -2318,7 +2317,7 @@ const IR::Node* TypeInference::bitwise(const IR::Operation_Binary* expression) {
 
     const IR::Type* resultType = ltype;
     if (bl != nullptr && br != nullptr) {
-        if (!TypeMap::equivalent(bl, br, strictStruct)) {
+        if (!typeMap->equivalent(bl, br)) {
             typeError("%1%: Cannot operate on values with different types %2% and %3%",
                       expression, bl->toString(), br->toString());
             return expression;
@@ -2381,7 +2380,7 @@ const IR::Node* TypeInference::typeSet(const IR::Operation_Binary* expression) {
 
     const IR::Type* sameType = leftType;
     if (bl != nullptr && br != nullptr) {
-        if (!TypeMap::equivalent(bl, br, strictStruct)) {
+        if (!typeMap->equivalent(bl, br)) {
             typeError("%1%: Cannot operate on values with different types %2% and %3%",
                       expression, bl->toString(), br->toString());
             return expression;
@@ -2523,7 +2522,7 @@ const IR::Node* TypeInference::postorder(IR::Cast* expression) {
                 return result;
             } else {
                 auto sit = getTypeType(se->type);
-                if (TypeMap::equivalent(st, sit, strictStruct))
+                if (typeMap->equivalent(st, sit))
                     return expression->expr;
                 else
                     typeError("%1%: cast not supported", expression->destType);
@@ -3013,7 +3012,7 @@ TypeInference::actionCall(bool inActionList,
 
     bool inTable = findContext<IR::P4Table>() != nullptr;
 
-    TypeConstraints constraints(typeMap->getSubstitutions(), strictStruct);
+    TypeConstraints constraints(typeMap->getSubstitutions(), typeMap);
     auto params = new IR::ParameterList;
 
     // keep track of parameters that have not been matched yet
